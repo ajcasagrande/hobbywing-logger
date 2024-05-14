@@ -70,7 +70,7 @@ bool bufferFlag = false;
 uint32_t prevMs = 0;
 uint32_t currMs = 0;
 uint32_t dupePrevMs = 0;
-uint32_t dupeCount = 0;
+uint8_t dupeCount = 0;
 
 uint8_t result[RESULT_SIZE];
 
@@ -103,6 +103,7 @@ void systemError(byte errorType)
 void setup(void)
 {
   pinMode(stat1, OUTPUT);
+  digitalWrite(stat1, HIGH); //Turn on indicator LED to let user know we are online
 
   //Power down various bits of hardware to lower power usage
   set_sleep_mode(SLEEP_MODE_IDLE);
@@ -184,7 +185,7 @@ char* newLog(void)
   static char newFileName[13];
   while(1)
   {
-    sprintf_P(newFileName, PSTR("LOG%05d.TXT"), newFileNumber); //Splice the new file number into this file name
+    sprintf_P(newFileName, PSTR("HWLOG_%05d.bin"), newFileNumber); //Splice the new file number into this file name
 
     //If we are able to create this file, then it didn't exist, we're good, break
     if (newFile.open(newFileName, O_CREAT | O_EXCL | O_WRITE)) break;
@@ -239,42 +240,42 @@ void handleBuffer(SdFile& workingFile) {
     dupeCount++;
     dupePrevMs = currMs;
     if (dupeCount < MAX_DUPES) {
+      // skip logging the dupe
       return;
     }
   }
 
-    if (dupeCount > 0) {
-      uint32_t diff = isDupe ? currMs - prevMs : dupePrevMs - prevMs;
-      
-      workingFile.print(diff);
-      workingFile.print(",");
-      workingFile.println(dupeCount);
-      workingFile.flush();
-
-      dupeCount = 0;
-      prevMs = dupePrevMs;
-      if (isDupe) {
-        prevMs = currMs;
-        // we are still a dupe, but wanted to print out current progress
-        return;
-      }
-    }
-
-    result[0] = buffer[11];  // status: neutral=0, gas=1, brake=2
-    result[1] = buffer[9];   // throttle input
-    result[2] = buffer[10];  // throttle output
-    result[3] = buffer[13];  // rpm low-byte
-    result[4] = buffer[14];  // rpm high-byte
-    result[5] = buffer[15];  // volt low-byte
-    result[6] = buffer[19];  // temperature
-    result[7] = buffer[21];  // motorTemp
+  if (dupeCount > 0) {
+    uint32_t diff = isDupe ? currMs - prevMs : dupePrevMs - prevMs;
     
-    uint32_t diff = prevMs == 0 ? 0 : currMs - prevMs;
-    printResult(workingFile, diff);
+    workingFile.write((uint8_t*)&diff, sizeof(uint32_t));
+    workingFile.write((uint8_t)dupeCount);
+    workingFile.flush();
 
-    prevMs = currMs;
-    // copy to prev buffer
-    memcpy(buffer1, buffer, BUFFER_SIZE*sizeof(uint8_t));
+    dupeCount = 0;
+    prevMs = dupePrevMs;
+    if (isDupe) {
+      prevMs = currMs;
+      // we are still a dupe, but wanted to print out current progress
+      return;
+    }
+  }
+
+  result[0] = buffer[11];  // status: neutral=0, gas=1, brake=2
+  result[1] = buffer[9];   // throttle input
+  result[2] = buffer[10];  // throttle output
+  result[3] = buffer[13];  // rpm low-byte
+  result[4] = buffer[14];  // rpm high-byte
+  result[5] = buffer[15];  // volt low-byte
+  result[6] = buffer[19];  // temperature
+  result[7] = buffer[21];  // motorTemp
+  
+  uint32_t diff = prevMs == 0 ? 0 : currMs - prevMs;
+  writeResult(workingFile, diff);
+
+  prevMs = currMs;
+  // copy to prev buffer
+  memcpy(buffer1, buffer, BUFFER_SIZE*sizeof(uint8_t));
 }
 
 //This is the most important function of the device. These loops have been tweaked as much as possible.
@@ -311,11 +312,9 @@ byte appendFile(char* fileName)
 #endif
 
   NewSerial.print(F("<")); //give a different prompt to indicate no echoing
-  digitalWrite(stat1, HIGH); //Turn on indicator LED
+  digitalWrite(stat1, LOW); //Turn off indicator LED
 
   unsigned long lastSyncTime = millis(); //Keeps track of the last time the file was synced
-
-
   while (1) {
     // Read data from NewSerial and print as hexadecimal
     while (NewSerial.available()) {
@@ -399,26 +398,31 @@ void blinkError(byte ERROR_TYPE) {
 //Given a pin, it will toggle it from high to low or vice versa
 void toggleLED(byte pinNumber)
 {
-  if (digitalRead(pinNumber)) digitalWrite(pinNumber, LOW);
-  else digitalWrite(pinNumber, HIGH);
+  if (digitalRead(pinNumber)) { 
+    digitalWrite(pinNumber, LOW); 
+  } else {
+    digitalWrite(pinNumber, HIGH);
+  }
 }
 
 
 
-void printResult(SdFile& workingFile, uint32_t diff) {
-  workingFile.print(diff);
-  workingFile.print(",0,");
-
-
-  // Print the contents of the buffer
-  for (int i = 0; i < RESULT_SIZE; i++) {
-    if (result[i] < 0x10) {
-      workingFile.print("0"); // Print leading zero for single digit
-    }
-    workingFile.print(result[i], HEX);
-    workingFile.print(" ");
-  }
-  workingFile.println();
+void writeResult(SdFile& workingFile, uint32_t diff) {
+  workingFile.write((uint8_t*)&diff, sizeof(uint32_t));
+  workingFile.write((uint8_t)0);  // no dupes
+  workingFile.write(result, RESULT_SIZE);
   workingFile.flush();
+
+
+  // // Print the contents of the buffer
+  // for (int i = 0; i < RESULT_SIZE; i++) {
+  //   if (result[i] < 0x10) {
+  //     workingFile.print("0"); // Print leading zero for single digit
+  //   }
+  //   workingFile.print(result[i], HEX);
+  //   workingFile.print(" ");
+  // }
+  // workingFile.println();
+  // workingFile.flush();
 }
 
