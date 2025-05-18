@@ -1,4 +1,7 @@
 /*
+Hobbywing Logger
+Copyright (c) 2024 Anthony Casagrande
+
  12-3-09
  Nathan Seidle
  SparkFun Electronics 2012
